@@ -147,9 +147,12 @@ contract Revolution is Accessibility, PaymentSystem {
     // send dividends and ref bonus
     if (investor.refBonus > 0) {
       assert(m_investors.setRefBonus(msg.sender, 0));
-      sendDividendsWithRefBonus(msg.sender, value, investor.refBonus);
+      require(msg.sender.send(value + investor.refBonus), "dividend payment failed");
+      emit LogPayDividends(msg.sender, now, value);
+      emit LogPayReferrerBonus(msg.sender, now, investor.refBonus);
     } else {
-      sendDividends(msg.sender, value);
+      require(msg.sender.send(value), "dividend payment failed");
+      emit LogPayDividends(msg.sender, now, value);
     }
   }
 
