@@ -13,6 +13,7 @@ import waitEvents from './helpers/waitEvents';
 import { Paymode } from './PaymentSystem_spec';
 import { AccessRank } from './Accessibility_spec';
 const Revolution = artifacts.require('./contracts/Revolution.sol');
+const TestRejectingInvestor = artifacts.require('./contracts/tests/TestRejectingInvestor.sol');
 
 let instance, owner, addr1, addr2, addr3, addr4, creationTime;
 
@@ -854,6 +855,39 @@ contract('Revolution', () => {
   describe('getMyDividends()', () => {
     beforeEach(async () => {
       await initContract();
+    });
+    it('preserves unpaid dividends and referral bonus when the recipient rejects ETH', async () => {
+      const wallet = await TestRejectingInvestor.new({ from: owner });
+      await instance.doInvest([], { from: addr2, value: ether(1) });
+      await instance.payout({ from: owner });
+      await instance.setPullPaymode({ from: owner });
+      await wallet.invest(instance.address, { from: owner, value: ether(1) });
+      await instance.doInvest([wallet.address, ZERO_ADDRESS, ZERO_ADDRESS], { from: addr1, value: ether(1) });
+      await increaseTime(duration.hours(25));
+
+      const before = await instance.investorInfo(wallet.address);
+      const balanceBefore = await instance.balanceETH();
+      await assertRevert(wallet.claim(instance.address, { from: owner }));
+      const afterFailure = await instance.investorInfo(wallet.address);
+      assert.equal(afterFailure[1].toString(10), before[1].toString(10));
+      assert.equal(afterFailure[2].toString(10), before[2].toString(10));
+      assert.equal((await instance.balanceETH()).toString(10), balanceBefore.toString(10));
+
+      await wallet.setAcceptsPayments(true, { from: owner });
+      await wallet.claim(instance.address, { from: owner });
+      const afterSuccess = await instance.investorInfo(wallet.address);
+      assert.equal(afterSuccess[2].toString(10), '0');
+      assert(afterSuccess[1].toNumber() > before[1].toNumber());
+      assert.equal((await getBalance(wallet.address)).toString(10), ether(0.0633).toString(10));
+
+      await wallet.setAcceptsPayments(false, { from: owner });
+      await increaseTime(duration.hours(25));
+      await assertRevert(wallet.claim(instance.address, { from: owner }));
+      const afterSecondFailure = await instance.investorInfo(wallet.address);
+      assert.equal(afterSecondFailure[1].toString(10), afterSuccess[1].toString(10));
+      await wallet.setAcceptsPayments(true, { from: owner });
+      await wallet.claim(instance.address, { from: owner });
+      assert.equal((await getBalance(wallet.address)).toString(10), ether(0.0966).toString(10));
     });
     it('throw on not paymode - pull', async () => {
       await instance.doInvest([], { from: addr2, value: ether(1) });
